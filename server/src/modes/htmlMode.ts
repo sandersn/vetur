@@ -2,7 +2,7 @@ import { LanguageModelCache, getLanguageModelCache } from '../languageModelCache
 import { LanguageService as HTMLLanguageService, HTMLDocument, DocumentContext, FormattingOptions } from 'vscode-html-languageservice';
 import { TextDocument, Position, Range } from 'vscode-languageserver-types';
 import { LanguageMode } from './languageModes';
-import { HTMLDocumentRegions, CSS_STYLE_RULE } from './embeddedSupport';
+import { HTMLDocumentRegions } from './embeddedSupport';
 
 export function getVueHTMLMode(htmlLanguageService: HTMLLanguageService, documentRegions: LanguageModelCache<HTMLDocumentRegions>): LanguageMode {
   let settings: any = {};
