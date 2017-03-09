@@ -3,6 +3,7 @@ import { SymbolInformation, SymbolKind, CompletionItem, Location, SignatureHelp,
 import { LanguageMode } from './languageModes';
 import { getWordAtText, startsWith, isWhitespaceOnly, repeat } from '../utils/strings';
 import { HTMLDocumentRegions } from './embeddedSupport';
+import { parseComponent } from "vue-template-compiler";
 
 import * as ts from 'typescript';
 import { join } from 'path';
@@ -12,10 +13,103 @@ const JQUERY_D_TS = join(__dirname, '../../lib/jquery.d.ts');
 
 const JS_WORD_REGEX = /(-?\d*\.\d\w*)|([^\`\~\!\@\#\%\^\&\*\(\)\-\=\+\[\{\]\}\\\|\;\:\'\"\,\.\<\>\/\?\s]+)/g;
 
-export function getJavascriptMode(documentRegions: LanguageModelCache<HTMLDocumentRegions>): LanguageMode {
+function createUpdater(clssf, ulssf) {
+  function createLanguageServiceSourceFile(fileName: string, scriptSnapshot: ts.IScriptSnapshot, scriptTarget: ts.ScriptTarget, version: string, setNodeParents: boolean, scriptKind?: ts.ScriptKind, cheat?: string): ts.SourceFile {
+    if (interested(fileName)) {
+      const wrapped = scriptSnapshot;
+      scriptSnapshot = {
+        getChangeRange: old => wrapped.getChangeRange(old),
+        getLength: () => wrapped.getLength(),
+        getText: (start, end) => parse(wrapped.getText(0, wrapped.getLength())).slice(start, end),
+      };
+    }
+    var sourceFile = clssf(fileName, scriptSnapshot, scriptTarget, version, setNodeParents, scriptKind);
+    if (interested(fileName)) {
+      modifyVueSource(sourceFile);
+    }
+    return sourceFile;
+  }
+
+  function updateLanguageServiceSourceFile(sourceFile: ts.SourceFile, scriptSnapshot: ts.IScriptSnapshot, version: string, textChangeRange: ts.TextChangeRange, aggressiveChecks?: boolean, cheat?: string): ts.SourceFile {
+    if (interested(sourceFile.fileName)) {
+      const wrapped = scriptSnapshot;
+      scriptSnapshot = {
+        getChangeRange: old => wrapped.getChangeRange(old),
+        getLength: () => wrapped.getLength(),
+        getText: (start, end) => parse(wrapped.getText(0, wrapped.getLength())).slice(start, end),
+      };
+    }
+    sourceFile = ulssf(sourceFile, scriptSnapshot, version, textChangeRange, aggressiveChecks);
+    if (interested(sourceFile.fileName)) {
+      modifyVueSource(sourceFile);
+    }
+    return sourceFile;
+  }
+  return { createLanguageServiceSourceFile, updateLanguageServiceSourceFile }
+}
+  function interested(filename: string): boolean {
+    // TODO: synthetic filename is not a good solution since imports don't work
+    return filename.slice(filename.lastIndexOf('.')) === ".vue" || filename === "vscode://javascript/1";
+  }
+
+  function importInterested(filename: string): boolean {
+    return interested(filename) && filename.slice(0, 2) === "./";
+  }
+
+  function parse(text: string) {
+    const output = parseComponent(text, { pad: "space" });
+    if (output && output.script && output.script.content) {
+      return output.script.content;
+    }
+    else {
+      return text;
+    }
+  }
+
+  /** Works like Array.prototype.find, returning `undefined` if no element satisfying the predicate is found. */
+  function find<T>(array: T[], predicate: (element: T, index: number) => boolean): T | undefined {
+    for (let i = 0; i < array.length; i++) {
+      const value = array[i];
+      if (predicate(value, i)) {
+        return value;
+      }
+    }
+    return undefined;
+  }
+
+  function modifyVueSource(sourceFile: ts.SourceFile): void {
+    // 1. add `import Vue from './vue'
+    // 2. find the export default and wrap it in `new Vue(...)` if it exists and is an object literal
+    const exportDefaultObject = find(sourceFile.statements, st => st.kind === ts.SyntaxKind.ExportAssignment &&
+      (st as ts.ExportAssignment).expression.kind === ts.SyntaxKind.ObjectLiteralExpression);
+    var b = <T extends ts.Node>(n: T) => ts.setTextRange(n, { pos: 0, end: 0 });
+    if (exportDefaultObject) {
+      //logger.info(exportDefaultObject.toString());
+      const vueImport = b(ts.createImportDeclaration(undefined,
+        undefined,
+        b(ts.createImportClause(undefined,
+          b(ts.createNamedImports([
+            b(ts.createImportSpecifier(
+              b(ts.createIdentifier("Vue")),
+              b(ts.createIdentifier("Vue"))))])))),
+        b(ts.createLiteral("./vue"))));
+      sourceFile.statements.unshift(vueImport);
+      const obj = (exportDefaultObject as ts.ExportAssignment).expression as ts.ObjectLiteralExpression;
+      (exportDefaultObject as ts.ExportAssignment).expression = ts.setTextRange(ts.createNew(ts.setTextRange(ts.createIdentifier("Vue"), { pos: obj.pos, end: obj.pos + 1 }),
+        undefined,
+        [obj]),
+        obj);
+      ts.setTextRange(((exportDefaultObject as ts.ExportAssignment).expression as ts.NewExpression).arguments, obj);
+    }
+  }
+
+
+
+export function getJavascriptMode(documentRegions: LanguageModelCache<HTMLDocumentRegions>, workspacePath: string): LanguageMode {
   let jsDocuments = getLanguageModelCache<TextDocument>(10, 60, document => documentRegions.get(document).getEmbeddedDocument('javascript'));
 
   let compilerOptions: ts.CompilerOptions = { allowNonTsExtensions: true, allowJs: true, lib: ['lib.es6.d.ts'], target: ts.ScriptTarget.Latest, moduleResolution: ts.ModuleResolutionKind.Classic };
+  compilerOptions["plugins"] = [{ "name": "vue-ts-plugin" }];
   let currentTextDocument: TextDocument;
   let scriptFileVersion: number = 0;
   function updateCurrentTextDocument(doc: TextDocument) {
@@ -24,6 +118,23 @@ export function getJavascriptMode(documentRegions: LanguageModelCache<HTMLDocume
       scriptFileVersion++;
     }
   }
+
+  // HACK
+  const { createLanguageServiceSourceFile, updateLanguageServiceSourceFile } = 
+    createUpdater(ts.createLanguageServiceSourceFile, ts.updateLanguageServiceSourceFile);
+  (ts as any).createLanguageServiceSourceFile = createLanguageServiceSourceFile;
+  (ts as any).updateLanguageServiceSourceFile = updateLanguageServiceSourceFile;
+  // END HACK
+
+  // TODO: Using workspacePath, walk up from the current file and find the tsconfig. To do this,
+  // in server/editorServices, first findConfigFile then convertConfigFileContentToProjectOptions.
+  // this will let you rewrite the host below to have compilerOptions and the correct list of files.
+  // Note that I'll also need a correct Map<number> to track scriptFileVersion, because the current one only has one (1) file.
+  // getScriptKind will also need to use the original filename, plus look at the current region's lang attribute.
+  // getScriptSnapshot will need the sanitising code instead of updateCurrentTextDocument (though I am not sure this will work)
+  
+  // THEN try adding a host API hook for the language service to call to create source files, and inside here
+  // add createLanguageServiceSourceFile should do the hooking and so on.
   let host = {
     getCompilationSettings: () => compilerOptions,
     getScriptFileNames: () => [FILE_NAME, JQUERY_D_TS],
@@ -32,6 +143,10 @@ export function getJavascriptMode(documentRegions: LanguageModelCache<HTMLDocume
         return String(scriptFileVersion);
       }
       return '1'; // default lib an jquery.d.ts are static
+    },
+    getScriptKind(fileName: string) {
+      // TODO: Actually check the lang property of the language model
+      return ts.ScriptKind.TS; // I like TS!
     },
     getScriptSnapshot: (fileName: string) => {
       let text = '';
@@ -64,7 +179,8 @@ export function getJavascriptMode(documentRegions: LanguageModelCache<HTMLDocume
     },
     doValidation(document: TextDocument): Diagnostic[] {
       updateCurrentTextDocument(document);
-      const diagnostics = jsLanguageService.getSyntacticDiagnostics(FILE_NAME);
+      const diagnostics = jsLanguageService.getSyntacticDiagnostics(FILE_NAME).concat(jsLanguageService.getSemanticDiagnostics(FILE_NAME));
+      
       return diagnostics.map((diag): Diagnostic => {
         return {
           range: convertRange(currentTextDocument, diag),
