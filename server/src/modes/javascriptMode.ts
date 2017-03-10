@@ -77,7 +77,11 @@ export function getJavascriptMode(documentRegions: LanguageModelCache<HTMLDocume
       //isExternalLibraryImport: true,
       // TODO: probably should lift restriction that everything be in the same directory eventually
       // TODO: should probably special case ./vue
-      return { resolvedFileName: path.join(path.dirname(containingFile), path.basename(name)) }
+      return { 
+        resolvedFileName: path.join(path.dirname(containingFile),
+        path.basename(name)), 
+        extension: ts.Extension.Ts 
+      }
     }
 
   let host: ts.LanguageServiceHost = {

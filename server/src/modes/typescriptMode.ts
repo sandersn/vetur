@@ -1,6 +1,5 @@
 import * as ts from 'typescript';
 import { parseComponent } from "vue-template-compiler";
-import path = require('path');
 
 type Path = string & { __pathBrand: any };
 
@@ -100,29 +99,6 @@ function getRootLength(path: string): number {
 }
 
 ///////////////////// basically copied from vue-ts-plugin /////////////////////
-export function resolveModules(rmn: any) {
-  (moduleName: string, containingFile: string, compilerOptions: ts.CompilerOptions, host: ts.ModuleResolutionHost, cache?: ts.ModuleResolutionCache) => {
-    console.log('trying to resolve modules')
-    //logger.info(`*** hooked resolveModuleName for ${moduleName}`);
-    if (importInterested(moduleName)) {
-      console.log('actually interested!')
-      //logger.info(`**** interested in ${moduleName} in ${containingFile}`);
-      return {
-        resolvedModule: {
-          // TODO: Figure out what Extension.Ts does and whether I need to add (1) external or (2) Vue
-          // used in module resolution not in determining the content
-          extension: ts.Extension.Ts,
-          isExternalLibraryImport: true,
-          resolvedFileName: path.join(path.dirname(containingFile), path.basename(moduleName)),
-        }
-      }
-    }
-    else {
-      return rmn(moduleName, containingFile, compilerOptions, host, cache);
-    }
-  }
-}
-
 export function createUpdater(clssf, ulssf) {
   function createLanguageServiceSourceFile(fileName: string, scriptSnapshot: ts.IScriptSnapshot, scriptTarget: ts.ScriptTarget, version: string, setNodeParents: boolean, scriptKind?: ts.ScriptKind, cheat?: string): ts.SourceFile {
     if (interested(fileName)) {
@@ -163,10 +139,6 @@ export function createUpdater(clssf, ulssf) {
 function interested(filename: string): boolean {
   // TODO: synthetic filename is not a good solution since imports don't work
   return filename.slice(filename.lastIndexOf('.')) === ".vue"; // || filename === "vscode://javascript/1";
-}
-
-function importInterested(filename: string): boolean {
-  return interested(filename) && filename.slice(0, 2) === "./";
 }
 
 function parse(text: string) {
