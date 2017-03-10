@@ -206,15 +206,20 @@ function getEmbeddedDocument(document: TextDocument, contents: EmbeddedRegion[],
   let oldContent = document.getText();
   let result = '';
   let lastSuffix = '';
-  for (let c of contents) {
-    if (c.languageId === languageId) {
-      result = substituteWithWhitespace(result, currentPos, c.start, oldContent, lastSuffix, getPrefix(c));
-      result += oldContent.substring(c.start, c.end);
-      currentPos = c.end;
-      lastSuffix = getSuffix(c);
-    }
+  if (languageId === 'javascript') {
+    result = oldContent; // let typescript try to figure it out
   }
-  result = substituteWithWhitespace(result, currentPos, oldContent.length, oldContent, lastSuffix, '');
+  else {
+    for (let c of contents) {
+      if (c.languageId === languageId) {
+        result = substituteWithWhitespace(result, currentPos, c.start, oldContent, lastSuffix, getPrefix(c));
+        result += oldContent.substring(c.start, c.end);
+        currentPos = c.end;
+        lastSuffix = getSuffix(c);
+      }
+    }
+    result = substituteWithWhitespace(result, currentPos, oldContent.length, oldContent, lastSuffix, '');
+  }
   return TextDocument.create(document.uri, languageId, document.version, result);
 }
 

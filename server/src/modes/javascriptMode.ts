@@ -1,18 +1,22 @@
 import { LanguageModelCache, getLanguageModelCache } from '../languageModelCache';
 import { SymbolInformation, SymbolKind, CompletionItem, Location, SignatureHelp, SignatureInformation, ParameterInformation, Definition, TextEdit, TextDocument, Diagnostic, DiagnosticSeverity, Range, CompletionItemKind, Hover, MarkedString, DocumentHighlight, DocumentHighlightKind, CompletionList, Position, FormattingOptions } from 'vscode-languageserver-types';
 import { LanguageMode } from './languageModes';
-import { getWordAtText, startsWith, isWhitespaceOnly, repeat } from '../utils/strings';
+import { getWordAtText, isWhitespaceOnly, repeat } from '../utils/strings';
 import { HTMLDocumentRegions } from './embeddedSupport';
+import path = require('path');
 
-import { findConfigFile, simpleParseJsonConfigFileContent, createUpdater } from './typescriptMode';
+import { findConfigFile, simpleParseJsonConfigFileContent, createUpdater/*, resolveModules*/ } from './typescriptMode';
 
 import * as ts from 'typescript';
-import { join } from 'path';
-
-const FILE_NAME = 'vscode://javascript/1';  // the same 'file' is used for all contents
-const JQUERY_D_TS = join(__dirname, '../../lib/jquery.d.ts');
 
 const JS_WORD_REGEX = /(-?\d*\.\d\w*)|([^\`\~\!\@\#\%\^\&\*\(\)\-\=\+\[\{\]\}\\\|\;\:\'\"\,\.\<\>\/\?\s]+)/g;
+
+function trimFileUri(uri: string): string {
+  if (uri.slice(0, "file://".length) === "file://") {
+    return uri.slice("file://".length);
+  }
+  return uri;
+}
 
 export function getJavascriptMode(documentRegions: LanguageModelCache<HTMLDocumentRegions>, workspacePath: string): LanguageMode {
   let jsDocuments = getLanguageModelCache<TextDocument>(10, 60, document => documentRegions.get(document).getEmbeddedDocument('javascript'));
@@ -29,45 +33,86 @@ export function getJavascriptMode(documentRegions: LanguageModelCache<HTMLDocume
   }
 
   // HACK
+  console.log('is there anybody out there')
   const { createLanguageServiceSourceFile, updateLanguageServiceSourceFile } = 
     createUpdater(ts.createLanguageServiceSourceFile, ts.updateLanguageServiceSourceFile);
   (ts as any).createLanguageServiceSourceFile = createLanguageServiceSourceFile;
   (ts as any).updateLanguageServiceSourceFile = updateLanguageServiceSourceFile;
-  // END HACK
+  // (ts as any).resolveModuleName = resolveModules((ts as any).resolveModuleName);
 
-  let host = {
+  var fshost: ts.LanguageServiceHost = {
     getCompilationSettings: () => compilerOptions,
-    getScriptFileNames: () => [FILE_NAME, JQUERY_D_TS],
-    getScriptVersion: (fileName: string) => {
-      if (fileName === FILE_NAME) {
-        return String(scriptFileVersion);
+    getScriptFileNames: () => [], // [FILE_NAME, JQUERY_D_TS],
+    getScriptVersion: () => "_",
+    fileExists: ts.sys.fileExists,
+    readFile: ts.sys.readFile,
+    trace: (s: string) => ts.sys.write(s + '\n'),
+    directoryExists: ts.sys.directoryExists,
+    getDirectories: ts.sys.getDirectories,
+    readDirectory: (path, extensions, exclude, include) => ts.sys.readDirectory(path, extensions, exclude, include),
+    getCurrentDirectory: () => workspacePath,
+    getDefaultLibFileName: ts.getDefaultLibFilePath,
+    useCaseSensitiveFileNames: () => ts.sys.useCaseSensitiveFileNames,
+    getScriptSnapshot: (fileName: string) => {
+      return {
+        getText: () => '',
+        getLength: () => 0,
+        getChangeRange: () => void 0
+      };
+    },
+  }
+  var files = simpleParseJsonConfigFileContent(fshost, findConfigFile(fshost, workspacePath));
+  // TODO: Make sure FILE_NAME isn't used anymore. Not sure how to prevent it from being passed around though.
+  // (I'll probably have to poke around in the debugger)
+  // END HACK
+  var versions: ts.MapLike<number> = {};
+  const funkyResolve: (containingFile: string) => (name: string) => ts.ResolvedModule =
+    containingFile => name => {
+      if (name === './vue') {
+        name += '.d.ts'
       }
-      return '1'; // default lib an jquery.d.ts are static
+      // TODO: Figure out what Extension.Ts does and whether I need to add (1) external or (2) Vue
+      // used in module resolution not in determining the content
+      //extension: ts.Extension.Ts,
+      //isExternalLibraryImport: true,
+      // TODO: probably should lift restriction that everything be in the same directory eventually
+      // TODO: should probably special case ./vue
+      return { resolvedFileName: path.join(path.dirname(containingFile), path.basename(name)) }
+    }
+
+  let host: ts.LanguageServiceHost = {
+    resolveModuleNames(moduleNames: string[], containingFile: string): ts.ResolvedModule[] {
+      console.log(`resolving ${JSON.stringify(moduleNames)}`)
+      console.log(`to ${JSON.stringify(moduleNames.map(funkyResolve(containingFile)))}`)
+      return moduleNames.map(funkyResolve(containingFile));
+    },
+    getCompilationSettings: () => compilerOptions,
+    getScriptFileNames: () => files, // [FILE_NAME, JQUERY_D_TS],
+    getScriptVersion(filename: string) {
+      if (filename in versions) {
+        versions[filename]++
+        return versions[filename].toString()
+      }
+      else {
+        versions[filename] = 0
+        return '0'
+      }
     },
     getScriptKind(fileName: string) {
       // TODO: Actually check the lang property of the language model
       return ts.ScriptKind.TS; // I like TS!
     },
     getScriptSnapshot: (fileName: string) => {
-      let text = '';
-      if (startsWith(fileName, 'vscode:')) {
-        if (fileName === FILE_NAME) {
-          text = currentTextDocument.getText();
-        }
-      } else {
-        text = ts.sys.readFile(fileName) || '';
-      }
+      let text = ts.sys.readFile(fileName) || '';
       return {
         getText: (start, end) => text.substring(start, end),
         getLength: () => text.length,
         getChangeRange: () => void 0
       };
     },
-    getCurrentDirectory: () => '',
-    getDefaultLibFileName: (options) => ts.getDefaultLibFilePath(options)
+    getCurrentDirectory: () => workspacePath,
+    getDefaultLibFileName: ts.getDefaultLibFilePath,
   };
-  // TODO: This is the LEAST efficient way of doing things ok
-  host.getScriptFileNames = () => simpleParseJsonConfigFileContent(host, findConfigFile(host, workspacePath));
   let jsLanguageService = ts.createLanguageService(host);
 
   let settings: any = {};
@@ -81,7 +126,7 @@ export function getJavascriptMode(documentRegions: LanguageModelCache<HTMLDocume
     },
     doValidation(document: TextDocument): Diagnostic[] {
       updateCurrentTextDocument(document);
-      const diagnostics = jsLanguageService.getSyntacticDiagnostics(FILE_NAME).concat(jsLanguageService.getSemanticDiagnostics(FILE_NAME));
+      const diagnostics = jsLanguageService.getSyntacticDiagnostics(trimFileUri(document.uri)).concat(jsLanguageService.getSemanticDiagnostics(trimFileUri(document.uri)));
       
       return diagnostics.map((diag): Diagnostic => {
         return {
@@ -94,7 +139,7 @@ export function getJavascriptMode(documentRegions: LanguageModelCache<HTMLDocume
     doComplete(document: TextDocument, position: Position): CompletionList {
       updateCurrentTextDocument(document);
       let offset = currentTextDocument.offsetAt(position);
-      let completions = jsLanguageService.getCompletionsAtPosition(FILE_NAME, offset);
+      let completions = jsLanguageService.getCompletionsAtPosition(trimFileUri(document.uri), offset);
       if (!completions) {
         return { isIncomplete: false, items: [] };
       }
@@ -120,7 +165,7 @@ export function getJavascriptMode(documentRegions: LanguageModelCache<HTMLDocume
     },
     doResolve(document: TextDocument, item: CompletionItem): CompletionItem {
       updateCurrentTextDocument(document);
-      let details = jsLanguageService.getCompletionEntryDetails(FILE_NAME, item.data.offset, item.label);
+      let details = jsLanguageService.getCompletionEntryDetails(trimFileUri(document.uri), item.data.offset, item.label);
       if (details) {
         item.detail = ts.displayPartsToString(details.displayParts);
         item.documentation = ts.displayPartsToString(details.documentation);
@@ -130,7 +175,7 @@ export function getJavascriptMode(documentRegions: LanguageModelCache<HTMLDocume
     },
     doHover(document: TextDocument, position: Position): Hover {
       updateCurrentTextDocument(document);
-      let info = jsLanguageService.getQuickInfoAtPosition(FILE_NAME, currentTextDocument.offsetAt(position));
+      let info = jsLanguageService.getQuickInfoAtPosition(trimFileUri(document.uri), currentTextDocument.offsetAt(position));
       if (info) {
         let contents = ts.displayPartsToString(info.displayParts);
         return {
@@ -142,7 +187,7 @@ export function getJavascriptMode(documentRegions: LanguageModelCache<HTMLDocume
     },
     doSignatureHelp(document: TextDocument, position: Position): SignatureHelp {
       updateCurrentTextDocument(document);
-      let signHelp = jsLanguageService.getSignatureHelpItems(FILE_NAME, currentTextDocument.offsetAt(position));
+      let signHelp = jsLanguageService.getSignatureHelpItems(trimFileUri(document.uri), currentTextDocument.offsetAt(position));
       if (signHelp) {
         let ret: SignatureHelp = {
           activeSignature: signHelp.selectedItemIndex,
@@ -179,7 +224,7 @@ export function getJavascriptMode(documentRegions: LanguageModelCache<HTMLDocume
     },
     findDocumentHighlight(document: TextDocument, position: Position): DocumentHighlight[] {
       updateCurrentTextDocument(document);
-      let occurrences = jsLanguageService.getOccurrencesAtPosition(FILE_NAME, currentTextDocument.offsetAt(position));
+      let occurrences = jsLanguageService.getOccurrencesAtPosition(trimFileUri(document.uri), currentTextDocument.offsetAt(position));
       if (occurrences) {
         return occurrences.map(entry => {
           return {
@@ -192,7 +237,7 @@ export function getJavascriptMode(documentRegions: LanguageModelCache<HTMLDocume
     },
     findDocumentSymbols(document: TextDocument): SymbolInformation[] {
       updateCurrentTextDocument(document);
-      let items = jsLanguageService.getNavigationBarItems(FILE_NAME);
+      let items = jsLanguageService.getNavigationBarItems(trimFileUri(document.uri));
       if (items) {
         let result: SymbolInformation[] = [];
         let existing = {};
@@ -228,9 +273,9 @@ export function getJavascriptMode(documentRegions: LanguageModelCache<HTMLDocume
     },
     findDefinition(document: TextDocument, position: Position): Definition {
       updateCurrentTextDocument(document);
-      let definition = jsLanguageService.getDefinitionAtPosition(FILE_NAME, currentTextDocument.offsetAt(position));
+      let definition = jsLanguageService.getDefinitionAtPosition(trimFileUri(document.uri), currentTextDocument.offsetAt(position));
       if (definition) {
-        return definition.filter(d => d.fileName === FILE_NAME).map(d => {
+        return definition.map(d => {
           return {
             uri: document.uri,
             range: convertRange(currentTextDocument, d.textSpan)
@@ -241,9 +286,9 @@ export function getJavascriptMode(documentRegions: LanguageModelCache<HTMLDocume
     },
     findReferences(document: TextDocument, position: Position): Location[] {
       updateCurrentTextDocument(document);
-      let references = jsLanguageService.getReferencesAtPosition(FILE_NAME, currentTextDocument.offsetAt(position));
+      let references = jsLanguageService.getReferencesAtPosition(trimFileUri(document.uri), currentTextDocument.offsetAt(position));
       if (references) {
-        return references.filter(d => d.fileName === FILE_NAME).map(d => {
+        return references.map(d => {
           return {
             uri: document.uri,
             range: convertRange(currentTextDocument, d.textSpan)
@@ -263,7 +308,7 @@ export function getJavascriptMode(documentRegions: LanguageModelCache<HTMLDocume
         end -= range.end.character;
         lastLineRange = Range.create(Position.create(range.end.line, 0), range.end);
       }
-      let edits = jsLanguageService.getFormattingEditsForRange(FILE_NAME, start, end, formatSettings);
+      let edits = jsLanguageService.getFormattingEditsForRange(trimFileUri(document.uri), start, end, formatSettings);
       if (edits) {
         let result = [];
         for (let edit of edits) {
