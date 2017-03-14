@@ -24,11 +24,12 @@ export function getJavascriptMode(documentRegions: LanguageModelCache<HTMLDocume
   let compilerOptions: ts.CompilerOptions = { allowNonTsExtensions: true, allowJs: true, lib: ['lib.es6.d.ts'], target: ts.ScriptTarget.Latest, moduleResolution: ts.ModuleResolutionKind.Classic };
   compilerOptions["plugins"] = [{ "name": "vue-ts-plugin" }];
   let currentTextDocument: TextDocument;
-  let scriptFileVersion: number = 0;
+  var versions: ts.MapLike<number> = {};
   function updateCurrentTextDocument(doc: TextDocument) {
     if (!currentTextDocument || doc.uri !== currentTextDocument.uri || doc.version !== currentTextDocument.version) {
       currentTextDocument = jsDocuments.get(doc);
-      scriptFileVersion++;
+      versions[trimFileUri(currentTextDocument.uri)] = (versions[trimFileUri(currentTextDocument.uri)] || 0) + 1;
+      console.log(`${trimFileUri(currentTextDocument.uri)}: v${versions[trimFileUri(currentTextDocument.uri)]}`);
     }
   }
 
@@ -38,7 +39,6 @@ export function getJavascriptMode(documentRegions: LanguageModelCache<HTMLDocume
     createUpdater(ts.createLanguageServiceSourceFile, ts.updateLanguageServiceSourceFile);
   (ts as any).createLanguageServiceSourceFile = createLanguageServiceSourceFile;
   (ts as any).updateLanguageServiceSourceFile = updateLanguageServiceSourceFile;
-  // (ts as any).resolveModuleName = resolveModules((ts as any).resolveModuleName);
 
   var fshost: ts.LanguageServiceHost = {
     getCompilationSettings: () => compilerOptions,
@@ -65,40 +65,36 @@ export function getJavascriptMode(documentRegions: LanguageModelCache<HTMLDocume
   // TODO: Make sure FILE_NAME isn't used anymore. Not sure how to prevent it from being passed around though.
   // (I'll probably have to poke around in the debugger)
   // END HACK
-  var versions: ts.MapLike<number> = {};
   const funkyResolve: (containingFile: string) => (name: string) => ts.ResolvedModule =
     containingFile => name => {
+      // TODO: This special case is *the worst*
       if (name === './vue') {
         name += '.d.ts'
       }
-      // TODO: Figure out what Extension.Ts does and whether I need to add (1) external or (2) Vue
-      // used in module resolution not in determining the content
-      //extension: ts.Extension.Ts,
-      //isExternalLibraryImport: true,
+      // TODO: Do I still need `isExternalLibraryImport: true`?
       // TODO: probably should lift restriction that everything be in the same directory eventually
-      // TODO: should probably special case ./vue
       return { 
-        resolvedFileName: path.join(path.dirname(containingFile),
-        path.basename(name)), 
-        extension: ts.Extension.Ts 
+        resolvedFileName: path.join(path.dirname(containingFile), path.basename(name)), 
+        extension: ts.Extension.Ts,
+        ieExternalLibraryImport: true
       }
     }
 
   let host: ts.LanguageServiceHost = {
     resolveModuleNames(moduleNames: string[], containingFile: string): ts.ResolvedModule[] {
-      console.log(`resolving ${JSON.stringify(moduleNames)}`)
-      console.log(`to ${JSON.stringify(moduleNames.map(funkyResolve(containingFile)))}`)
+      //console.log(`resolving ${JSON.stringify(moduleNames)}`)
+      //console.log(`to ${JSON.stringify(moduleNames.map(funkyResolve(containingFile)))}`)
       return moduleNames.map(funkyResolve(containingFile));
     },
     getCompilationSettings: () => compilerOptions,
     getScriptFileNames: () => files, // [FILE_NAME, JQUERY_D_TS],
     getScriptVersion(filename: string) {
       if (filename in versions) {
-        versions[filename]++
+        console.log(`${filename}: v${versions[filename]}`);
         return versions[filename].toString()
       }
       else {
-        versions[filename] = 0
+        console.log(`${filename} MISS!`);
         return '0'
       }
     },
@@ -116,7 +112,8 @@ export function getJavascriptMode(documentRegions: LanguageModelCache<HTMLDocume
     },
     getCurrentDirectory: () => workspacePath,
     getDefaultLibFileName: ts.getDefaultLibFilePath,
-  };
+    aRinger: 'vue-mode'
+  } as ts.LanguageServiceHost;
   let jsLanguageService = ts.createLanguageService(host);
 
   let settings: any = {};

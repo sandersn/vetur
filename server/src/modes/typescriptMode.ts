@@ -100,9 +100,9 @@ function getRootLength(path: string): number {
 
 ///////////////////// basically copied from vue-ts-plugin /////////////////////
 export function createUpdater(clssf, ulssf) {
-  function createLanguageServiceSourceFile(fileName: string, scriptSnapshot: ts.IScriptSnapshot, scriptTarget: ts.ScriptTarget, version: string, setNodeParents: boolean, scriptKind?: ts.ScriptKind, cheat?: string): ts.SourceFile {
+  function createLanguageServiceSourceFile(fileName: string, scriptSnapshot: ts.IScriptSnapshot, scriptTarget: ts.ScriptTarget, version: string, setNodeParents: boolean, scriptKind?: ts.ScriptKind): ts.SourceFile {
     if (interested(fileName)) {
-      console.log(`initial wrapping of ${fileName}`)
+      console.log(`initial wrapping of ${fileName}: ${scriptSnapshot.getLength()}, v${version}, `)
       const wrapped = scriptSnapshot;
       scriptSnapshot = {
         getChangeRange: old => wrapped.getChangeRange(old),
@@ -117,14 +117,16 @@ export function createUpdater(clssf, ulssf) {
     return sourceFile;
   }
 
-  function updateLanguageServiceSourceFile(sourceFile: ts.SourceFile, scriptSnapshot: ts.IScriptSnapshot, version: string, textChangeRange: ts.TextChangeRange, aggressiveChecks?: boolean, cheat?: string): ts.SourceFile {
+  function updateLanguageServiceSourceFile(sourceFile: ts.SourceFile, scriptSnapshot: ts.IScriptSnapshot, version: string, textChangeRange: ts.TextChangeRange, aggressiveChecks?: boolean): ts.SourceFile {
     if (interested(sourceFile.fileName)) {
-      console.log(`update ${sourceFile.fileName}`)
+      var chtext = textChangeRange ? `${textChangeRange.span.start}+${textChangeRange.span.length}` : 'x+x';
+      console.log(`update ${sourceFile.fileName}: ${scriptSnapshot.getLength()}, v${version}, ${chtext}`)
       const wrapped = scriptSnapshot;
+      const text = parse(wrapped.getText(0, wrapped.getLength()))
       scriptSnapshot = {
         getChangeRange: old => wrapped.getChangeRange(old),
-        getLength: () => wrapped.getLength(),
-        getText: (start, end) => parse(wrapped.getText(0, wrapped.getLength())).slice(start, end),
+        getLength: () => text.length,
+        getText: (start, end) => text.slice(start, end),
       };
     }
     sourceFile = ulssf(sourceFile, scriptSnapshot, version, textChangeRange, aggressiveChecks);
