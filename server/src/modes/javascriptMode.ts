@@ -33,14 +33,12 @@ export function getJavascriptMode(documentRegions: LanguageModelCache<HTMLDocume
     }
   }
 
-  // HACK
-  console.log('is there anybody out there')
+  // Patch typescript functions to insert `import Vue from 'vue'` and `new Vue` around export default.
   const { createLanguageServiceSourceFile, updateLanguageServiceSourceFile } = createUpdater();
   (ts as any).createLanguageServiceSourceFile = createLanguageServiceSourceFile;
   (ts as any).updateLanguageServiceSourceFile = updateLanguageServiceSourceFile;
 
   // var reshost: ts.ModuleResolutionHost; // TODO: Finish this!
-  // TODO:  What if configFile is undefined?
   const configFile = ts.findConfigFile(workspacePath, ts.sys.fileExists, "tsconfig.json") ||
     ts.findConfigFile(workspacePath, ts.sys.fileExists, "jsconfig.json");
   var files = ts.parseJsonConfigFileContent({},
@@ -80,8 +78,7 @@ export function getJavascriptMode(documentRegions: LanguageModelCache<HTMLDocume
       return ts.ScriptKind.TS; // I like TS!
     },
     getScriptSnapshot: (fileName: string) => {
-      // TODO: Should be able to parse here instead of in the create/update HACK
-      let text: string = ts.sys.readFile(fileName) || '';
+      let text: string;
       if (fileName in docs) {
         text = docs[fileName].getText();
       }
@@ -89,7 +86,6 @@ export function getJavascriptMode(documentRegions: LanguageModelCache<HTMLDocume
         text = ts.sys.readFile(fileName) || '';
       }
       if (interested(fileName)) {
-        // THIS WILL SURELY WORK
         text = parse(text);
       }
       return {
