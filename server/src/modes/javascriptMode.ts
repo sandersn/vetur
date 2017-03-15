@@ -5,7 +5,7 @@ import { getWordAtText, isWhitespaceOnly, repeat } from '../utils/strings';
 import { HTMLDocumentRegions } from './embeddedSupport';
 import path = require('path');
 
-import { findConfigFile, simpleParseJsonConfigFileContent, createUpdater/*, resolveModules*/ } from './typescriptMode';
+import { createUpdater, parse, interested } from './typescriptMode';
 
 import * as ts from 'typescript';
 
@@ -22,52 +22,34 @@ export function getJavascriptMode(documentRegions: LanguageModelCache<HTMLDocume
   let jsDocuments = getLanguageModelCache<TextDocument>(10, 60, document => documentRegions.get(document).getEmbeddedDocument('javascript'));
 
   let compilerOptions: ts.CompilerOptions = { allowNonTsExtensions: true, allowJs: true, lib: ['lib.es6.d.ts'], target: ts.ScriptTarget.Latest, moduleResolution: ts.ModuleResolutionKind.Classic };
-  compilerOptions["plugins"] = [{ "name": "vue-ts-plugin" }];
   let currentTextDocument: TextDocument;
   let versions: ts.MapLike<number> = {};
   let docs: ts.MapLike<TextDocument> = {};
   function updateCurrentTextDocument(doc: TextDocument) {
-    // TODO: Probably it's not worthwhile to update currentTextDocument if I use docs instead
     if (!currentTextDocument || doc.uri !== currentTextDocument.uri || doc.version !== currentTextDocument.version) {
       currentTextDocument = jsDocuments.get(doc);
-      docs[trimFileUri(currentTextDocument.uri)] = jsDocuments.get(doc); // whatever, probably not needed
+      docs[trimFileUri(currentTextDocument.uri)] = currentTextDocument;
       versions[trimFileUri(currentTextDocument.uri)] = (versions[trimFileUri(currentTextDocument.uri)] || 0) + 1;
-      console.log(`${trimFileUri(currentTextDocument.uri)} = ++v${versions[trimFileUri(currentTextDocument.uri)]}`);
     }
   }
 
   // HACK
   console.log('is there anybody out there')
-  const { createLanguageServiceSourceFile, updateLanguageServiceSourceFile } = 
-    createUpdater(ts.createLanguageServiceSourceFile, ts.updateLanguageServiceSourceFile);
+  const { createLanguageServiceSourceFile, updateLanguageServiceSourceFile } = createUpdater();
   (ts as any).createLanguageServiceSourceFile = createLanguageServiceSourceFile;
   (ts as any).updateLanguageServiceSourceFile = updateLanguageServiceSourceFile;
 
-  var fshost: ts.LanguageServiceHost = {
-    getCompilationSettings: () => compilerOptions,
-    getScriptFileNames: () => [], // [FILE_NAME, JQUERY_D_TS],
-    getScriptVersion: () => "_",
-    fileExists: ts.sys.fileExists,
-    readFile: ts.sys.readFile,
-    trace: (s: string) => ts.sys.write(s + '\n'),
-    directoryExists: ts.sys.directoryExists,
-    getDirectories: ts.sys.getDirectories,
-    readDirectory: (path, extensions, exclude, include) => ts.sys.readDirectory(path, extensions, exclude, include),
-    getCurrentDirectory: () => workspacePath,
-    getDefaultLibFileName: ts.getDefaultLibFilePath,
-    useCaseSensitiveFileNames: () => ts.sys.useCaseSensitiveFileNames,
-    getScriptSnapshot: (fileName: string) => {
-      return {
-        getText: () => '',
-        getLength: () => 0,
-        getChangeRange: () => void 0
-      };
-    },
-  }
   // var reshost: ts.ModuleResolutionHost; // TODO: Finish this!
-  var files = simpleParseJsonConfigFileContent(fshost, findConfigFile(fshost, workspacePath));
-  // TODO: Make sure FILE_NAME isn't used anymore. Not sure how to prevent it from being passed around though.
-  // (I'll probably have to poke around in the debugger)
+  // TODO:  What if configFile is undefined?
+  const configFile = ts.findConfigFile(workspacePath, ts.sys.fileExists, "tsconfig.json") ||
+    ts.findConfigFile(workspacePath, ts.sys.fileExists, "jsconfig.json");
+  var files = ts.parseJsonConfigFileContent({},
+    ts.sys,
+    workspacePath,
+    compilerOptions,
+    configFile,
+    undefined,
+    [{ extension: "vue", isMixedContent: true }]).fileNames;
   // END HACK
   const funkyResolve: (containingFile: string) => (name: string) => ts.ResolvedModule =
     containingFile => name => {
@@ -88,22 +70,11 @@ export function getJavascriptMode(documentRegions: LanguageModelCache<HTMLDocume
 
   let host: ts.LanguageServiceHost = {
     resolveModuleNames(moduleNames: string[], containingFile: string): ts.ResolvedModule[] {
-      //console.log(`resolving ${JSON.stringify(moduleNames)}`)
-      //console.log(`to ${JSON.stringify(moduleNames.map(funkyResolve(containingFile)))}`)
       return moduleNames.map(funkyResolve(containingFile));
     },
     getCompilationSettings: () => compilerOptions,
     getScriptFileNames: () => files,
-    getScriptVersion(filename: string) {
-      if (filename in versions) {
-        console.log(`get ${filename} is v${versions[filename]}`);
-        return versions[filename].toString()
-      }
-      else {
-        console.log(`${filename} MISS!`);
-        return '0'
-      }
-    },
+    getScriptVersion: filename => filename in versions ? versions[filename].toString() : '0',
     getScriptKind(fileName: string) {
       // TODO: Actually check the lang property of the language model
       return ts.ScriptKind.TS; // I like TS!
@@ -111,13 +82,15 @@ export function getJavascriptMode(documentRegions: LanguageModelCache<HTMLDocume
     getScriptSnapshot: (fileName: string) => {
       // TODO: Should be able to parse here instead of in the create/update HACK
       let text: string = ts.sys.readFile(fileName) || '';
-      if (docs[fileName]) {
+      if (fileName in docs) {
         text = docs[fileName].getText();
-        console.log(`Snapshot of ${fileName} with len == ${text.length}`);
       }
       else {
-        console.log(`SNAP ${fileName} from disk`);
         text = ts.sys.readFile(fileName) || '';
+      }
+      if (interested(fileName)) {
+        // THIS WILL SURELY WORK
+        text = parse(text);
       }
       return {
         getText: (start, end) => text.substring(start, end),
