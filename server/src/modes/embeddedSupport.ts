@@ -66,6 +66,9 @@ export function getDocumentRegions(languageService: LanguageService, document: T
           } else if (lastAttributeName === 'type' && lastTagName.toLowerCase() === 'script') {
             if (/["'](text|application)\/(java|ecma)script["']/.test(scanner.getTokenText())) {
               languageIdFromType = 'javascript';
+            }
+            else if (/["'](text|application)\/typescript["']/.test(scanner.getTokenText())) {
+              languageIdFromType = 'typescript';
             } else {
               languageIdFromType = void 0;
             }

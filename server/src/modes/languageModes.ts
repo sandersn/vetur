@@ -65,6 +65,7 @@ export function getLanguageModes(workspacePath: string): LanguageModes {
     less: getLESSMode(documentRegions),
     javascript: getJavascriptMode(documentRegions, workspacePath)
   };
+  modes['typescript'] = modes.javascript;
 
   return {
     getModeAtPosition(document: TextDocument, position: Position): LanguageMode {

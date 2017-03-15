@@ -19,7 +19,13 @@ function trimFileUri(uri: string): string {
 }
 
 export function getJavascriptMode(documentRegions: LanguageModelCache<HTMLDocumentRegions>, workspacePath: string): LanguageMode {
-  let jsDocuments = getLanguageModelCache<TextDocument>(10, 60, document => documentRegions.get(document).getEmbeddedDocument('javascript'));
+  let jsDocuments = getLanguageModelCache<TextDocument>(10, 60, document => {
+    const vueDocument = documentRegions.get(document);
+    if (vueDocument.getLanguagesInDocument().indexOf('typescript') > -1) {
+      return vueDocument.getEmbeddedDocument('typescript');
+    }
+    return vueDocument.getEmbeddedDocument('javascript');
+  });
 
   let compilerOptions: ts.CompilerOptions = { allowNonTsExtensions: true, allowJs: true, lib: ['lib.es6.d.ts'], target: ts.ScriptTarget.Latest, moduleResolution: ts.ModuleResolutionKind.Classic };
   let currentTextDocument: TextDocument;
