@@ -24,12 +24,15 @@ export function getJavascriptMode(documentRegions: LanguageModelCache<HTMLDocume
   let compilerOptions: ts.CompilerOptions = { allowNonTsExtensions: true, allowJs: true, lib: ['lib.es6.d.ts'], target: ts.ScriptTarget.Latest, moduleResolution: ts.ModuleResolutionKind.Classic };
   compilerOptions["plugins"] = [{ "name": "vue-ts-plugin" }];
   let currentTextDocument: TextDocument;
-  var versions: ts.MapLike<number> = {};
+  let versions: ts.MapLike<number> = {};
+  let docs: ts.MapLike<TextDocument> = {};
   function updateCurrentTextDocument(doc: TextDocument) {
+    // TODO: Probably it's not worthwhile to update currentTextDocument if I use docs instead
     if (!currentTextDocument || doc.uri !== currentTextDocument.uri || doc.version !== currentTextDocument.version) {
       currentTextDocument = jsDocuments.get(doc);
+      docs[trimFileUri(currentTextDocument.uri)] = jsDocuments.get(doc); // whatever, probably not needed
       versions[trimFileUri(currentTextDocument.uri)] = (versions[trimFileUri(currentTextDocument.uri)] || 0) + 1;
-      console.log(`${trimFileUri(currentTextDocument.uri)}: v${versions[trimFileUri(currentTextDocument.uri)]}`);
+      console.log(`${trimFileUri(currentTextDocument.uri)} = ++v${versions[trimFileUri(currentTextDocument.uri)]}`);
     }
   }
 
@@ -61,13 +64,16 @@ export function getJavascriptMode(documentRegions: LanguageModelCache<HTMLDocume
       };
     },
   }
+  // var reshost: ts.ModuleResolutionHost; // TODO: Finish this!
   var files = simpleParseJsonConfigFileContent(fshost, findConfigFile(fshost, workspacePath));
   // TODO: Make sure FILE_NAME isn't used anymore. Not sure how to prevent it from being passed around though.
   // (I'll probably have to poke around in the debugger)
   // END HACK
   const funkyResolve: (containingFile: string) => (name: string) => ts.ResolvedModule =
     containingFile => name => {
-      // TODO: This special case is *the worst*
+      // TODO: Delegate to ts.resolveModuleName for non-vue and non-relative files:
+      //   ts.resolveModuleName(name, containingFile, compilerOptions, reshost);
+      // TODO: This special case is *the worst*, replace it with a isImportedInterested predicate
       if (name === './vue') {
         name += '.d.ts'
       }
@@ -87,10 +93,10 @@ export function getJavascriptMode(documentRegions: LanguageModelCache<HTMLDocume
       return moduleNames.map(funkyResolve(containingFile));
     },
     getCompilationSettings: () => compilerOptions,
-    getScriptFileNames: () => files, // [FILE_NAME, JQUERY_D_TS],
+    getScriptFileNames: () => files,
     getScriptVersion(filename: string) {
       if (filename in versions) {
-        console.log(`${filename}: v${versions[filename]}`);
+        console.log(`get ${filename} is v${versions[filename]}`);
         return versions[filename].toString()
       }
       else {
@@ -103,7 +109,16 @@ export function getJavascriptMode(documentRegions: LanguageModelCache<HTMLDocume
       return ts.ScriptKind.TS; // I like TS!
     },
     getScriptSnapshot: (fileName: string) => {
-      let text = ts.sys.readFile(fileName) || '';
+      // TODO: Should be able to parse here instead of in the create/update HACK
+      let text: string = ts.sys.readFile(fileName) || '';
+      if (docs[fileName]) {
+        text = docs[fileName].getText();
+        console.log(`Snapshot of ${fileName} with len == ${text.length}`);
+      }
+      else {
+        console.log(`SNAP ${fileName} from disk`);
+        text = ts.sys.readFile(fileName) || '';
+      }
       return {
         getText: (start, end) => text.substring(start, end),
         getLength: () => text.length,
