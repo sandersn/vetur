@@ -1,12 +1,13 @@
 import * as ts from 'typescript';
+import path = require('path');
 import { parseComponent } from "vue-template-compiler";
 
-export function interested(filename: string): boolean {
-  return filename.slice(filename.lastIndexOf('.')) === ".vue";
+export function isVue(filename: string): boolean {
+  return path.extname(filename) === '.vue';
 }
 
-export function parse(text: string): string {
-  const output = parseComponent(text, { pad: "space" });
+export function parseVue(text: string): string {
+  const output = parseComponent(text, { pad: 'space' });
   if (output && output.script && output.script.content) {
     return output.script.content;
   }
@@ -20,7 +21,7 @@ export function createUpdater() {
   const ulssf = ts.updateLanguageServiceSourceFile;
   function createLanguageServiceSourceFile(fileName: string, scriptSnapshot: ts.IScriptSnapshot, scriptTarget: ts.ScriptTarget, version: string, setNodeParents: boolean, scriptKind?: ts.ScriptKind): ts.SourceFile {
     let sourceFile = clssf(fileName, scriptSnapshot, scriptTarget, version, setNodeParents, scriptKind);
-    if (interested(fileName)) {
+    if (isVue(fileName)) {
       modifyVueSource(sourceFile);
     }
     return sourceFile;
@@ -28,7 +29,7 @@ export function createUpdater() {
 
   function updateLanguageServiceSourceFile(sourceFile: ts.SourceFile, scriptSnapshot: ts.IScriptSnapshot, version: string, textChangeRange: ts.TextChangeRange, aggressiveChecks?: boolean): ts.SourceFile {
     sourceFile = ulssf(sourceFile, scriptSnapshot, version, textChangeRange, aggressiveChecks);
-    if (interested(sourceFile.fileName)) {
+    if (isVue(sourceFile.fileName)) {
       modifyVueSource(sourceFile);
     }
     return sourceFile;
@@ -59,16 +60,16 @@ function modifyVueSource(sourceFile: ts.SourceFile): void {
       zero(ts.createImportClause(undefined,
         zero(ts.createNamedImports([
           zero(ts.createImportSpecifier(
-            zero(ts.createIdentifier("Vue")),
-            zero(ts.createIdentifier("Vue"))))])))),
-      zero(ts.createLiteral("./vue"))));
+            zero(ts.createIdentifier('Vue')),
+            zero(ts.createIdentifier('Vue'))))])))),
+      zero(ts.createLiteral('vue'))));
     sourceFile.statements.unshift(vueImport);
 
     // 2. find the export default and wrap it in `new Vue(...)` if it exists and is an object literal
     //       (the span of the construct call is the same as the object literal)
     const objectLiteral = (exportDefaultObject as ts.ExportAssignment).expression as ts.ObjectLiteralExpression;
     const o = <T extends ts.TextRange>(n: T) => ts.setTextRange(n, objectLiteral);
-    const vue = ts.setTextRange(ts.createIdentifier("Vue"), { pos: objectLiteral.pos, end: objectLiteral.pos + 1 });
+    const vue = ts.setTextRange(ts.createIdentifier('Vue'), { pos: objectLiteral.pos, end: objectLiteral.pos + 1 });
     (exportDefaultObject as ts.ExportAssignment).expression = o(ts.createNew(vue, undefined, [objectLiteral]));
     o(((exportDefaultObject as ts.ExportAssignment).expression as ts.NewExpression).arguments);
   }

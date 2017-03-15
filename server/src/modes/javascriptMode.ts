@@ -5,7 +5,7 @@ import { getWordAtText, isWhitespaceOnly, repeat } from '../utils/strings';
 import { HTMLDocumentRegions } from './embeddedSupport';
 import path = require('path');
 
-import { createUpdater, parse, interested } from './typescriptMode';
+import { createUpdater, parseVue, isVue } from './typescriptMode';
 
 import * as ts from 'typescript';
 
@@ -38,38 +38,17 @@ export function getJavascriptMode(documentRegions: LanguageModelCache<HTMLDocume
   (ts as any).createLanguageServiceSourceFile = createLanguageServiceSourceFile;
   (ts as any).updateLanguageServiceSourceFile = updateLanguageServiceSourceFile;
 
-  // var reshost: ts.ModuleResolutionHost; // TODO: Finish this!
   const configFile = ts.findConfigFile(workspacePath, ts.sys.fileExists, "tsconfig.json") ||
     ts.findConfigFile(workspacePath, ts.sys.fileExists, "jsconfig.json");
-  var files = ts.parseJsonConfigFileContent({},
+  const files = ts.parseJsonConfigFileContent({},
     ts.sys,
     workspacePath,
     compilerOptions,
     configFile,
     undefined,
     [{ extension: "vue", isMixedContent: true }]).fileNames;
-  // END HACK
-  const funkyResolve: (containingFile: string) => (name: string) => ts.ResolvedModule =
-    containingFile => name => {
-      // TODO: Delegate to ts.resolveModuleName for non-vue and non-relative files:
-      //   ts.resolveModuleName(name, containingFile, compilerOptions, reshost);
-      // TODO: This special case is *the worst*, replace it with a isImportedInterested predicate
-      if (name === './vue') {
-        name += '.d.ts'
-      }
-      // TODO: Do I still need `isExternalLibraryImport: true`?
-      // TODO: probably should lift restriction that everything be in the same directory eventually
-      return { 
-        resolvedFileName: path.join(path.dirname(containingFile), path.basename(name)), 
-        extension: ts.Extension.Ts,
-        ieExternalLibraryImport: true
-      }
-    }
 
   let host: ts.LanguageServiceHost = {
-    resolveModuleNames(moduleNames: string[], containingFile: string): ts.ResolvedModule[] {
-      return moduleNames.map(funkyResolve(containingFile));
-    },
     getCompilationSettings: () => compilerOptions,
     getScriptFileNames: () => files,
     getScriptVersion: filename => filename in versions ? versions[filename].toString() : '0',
@@ -77,16 +56,21 @@ export function getJavascriptMode(documentRegions: LanguageModelCache<HTMLDocume
       // TODO: Actually check the lang property of the language model
       return ts.ScriptKind.TS; // I like TS!
     },
+    resolveModuleNames(moduleNames: string[], containingFile: string): ts.ResolvedModule[] {
+      // in the normal case, delegate to ts.resolveModuleName
+      // in the relative vue case, manually build a resolved filename
+      return moduleNames.map(name => 
+        path.isAbsolute(name) || !isVue(name) ? 
+          ts.resolveModuleName(name, containingFile, compilerOptions, ts.sys).resolvedModule : 
+          {
+            resolvedFileName: path.join(path.dirname(containingFile), name),
+            extension: ts.Extension.Ts,
+          })
+    },
     getScriptSnapshot: (fileName: string) => {
-      let text: string;
-      if (fileName in docs) {
-        text = docs[fileName].getText();
-      }
-      else {
-        text = ts.sys.readFile(fileName) || '';
-      }
-      if (interested(fileName)) {
-        text = parse(text);
+      let text = fileName in docs ? docs[fileName].getText() : (ts.sys.readFile(fileName) || '');
+      if (isVue(fileName)) {
+        text = parseVue(text);
       }
       return {
         getText: (start, end) => text.substring(start, end),
@@ -96,8 +80,7 @@ export function getJavascriptMode(documentRegions: LanguageModelCache<HTMLDocume
     },
     getCurrentDirectory: () => workspacePath,
     getDefaultLibFileName: ts.getDefaultLibFilePath,
-    aRinger: 'vue-mode'
-  } as ts.LanguageServiceHost;
+  };
   let jsLanguageService = ts.createLanguageService(host);
 
   let settings: any = {};
