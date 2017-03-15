@@ -70,6 +70,8 @@ export function getJavascriptMode(documentRegions: LanguageModelCache<HTMLDocume
     getScriptSnapshot: (fileName: string) => {
       let text = fileName in docs ? docs[fileName].getText() : (ts.sys.readFile(fileName) || '');
       if (isVue(fileName)) {
+        // Note: This is required in addition to the parsing in embeddedSupport because
+        // this works for .vue files that aren't even loaded by VS Code yet.
         text = parseVue(text);
       }
       return {
@@ -94,7 +96,9 @@ export function getJavascriptMode(documentRegions: LanguageModelCache<HTMLDocume
     },
     doValidation(document: TextDocument): Diagnostic[] {
       updateCurrentTextDocument(document);
-      const diagnostics = jsLanguageService.getSyntacticDiagnostics(trimFileUri(document.uri)).concat(jsLanguageService.getSemanticDiagnostics(trimFileUri(document.uri)));
+      const filename = trimFileUri(document.uri);
+      const diagnostics = [...jsLanguageService.getSyntacticDiagnostics(filename),
+                           ...jsLanguageService.getSemanticDiagnostics(filename)];
       
       return diagnostics.map((diag): Diagnostic => {
         return {
@@ -106,8 +110,9 @@ export function getJavascriptMode(documentRegions: LanguageModelCache<HTMLDocume
     },
     doComplete(document: TextDocument, position: Position): CompletionList {
       updateCurrentTextDocument(document);
+      let filename = trimFileUri(document.uri);
       let offset = currentTextDocument.offsetAt(position);
-      let completions = jsLanguageService.getCompletionsAtPosition(trimFileUri(document.uri), offset);
+      let completions = jsLanguageService.getCompletionsAtPosition(filename, offset);
       if (!completions) {
         return { isIncomplete: false, items: [] };
       }
@@ -133,7 +138,8 @@ export function getJavascriptMode(documentRegions: LanguageModelCache<HTMLDocume
     },
     doResolve(document: TextDocument, item: CompletionItem): CompletionItem {
       updateCurrentTextDocument(document);
-      let details = jsLanguageService.getCompletionEntryDetails(trimFileUri(document.uri), item.data.offset, item.label);
+      let filename = trimFileUri(document.uri);
+      let details = jsLanguageService.getCompletionEntryDetails(filename, item.data.offset, item.label);
       if (details) {
         item.detail = ts.displayPartsToString(details.displayParts);
         item.documentation = ts.displayPartsToString(details.documentation);
@@ -143,7 +149,8 @@ export function getJavascriptMode(documentRegions: LanguageModelCache<HTMLDocume
     },
     doHover(document: TextDocument, position: Position): Hover {
       updateCurrentTextDocument(document);
-      let info = jsLanguageService.getQuickInfoAtPosition(trimFileUri(document.uri), currentTextDocument.offsetAt(position));
+      let filename = trimFileUri(document.uri);
+      let info = jsLanguageService.getQuickInfoAtPosition(filename, currentTextDocument.offsetAt(position));
       if (info) {
         let contents = ts.displayPartsToString(info.displayParts);
         return {
@@ -155,7 +162,8 @@ export function getJavascriptMode(documentRegions: LanguageModelCache<HTMLDocume
     },
     doSignatureHelp(document: TextDocument, position: Position): SignatureHelp {
       updateCurrentTextDocument(document);
-      let signHelp = jsLanguageService.getSignatureHelpItems(trimFileUri(document.uri), currentTextDocument.offsetAt(position));
+      let filename = trimFileUri(document.uri);
+      let signHelp = jsLanguageService.getSignatureHelpItems(filename, currentTextDocument.offsetAt(position));
       if (signHelp) {
         let ret: SignatureHelp = {
           activeSignature: signHelp.selectedItemIndex,
@@ -192,7 +200,8 @@ export function getJavascriptMode(documentRegions: LanguageModelCache<HTMLDocume
     },
     findDocumentHighlight(document: TextDocument, position: Position): DocumentHighlight[] {
       updateCurrentTextDocument(document);
-      let occurrences = jsLanguageService.getOccurrencesAtPosition(trimFileUri(document.uri), currentTextDocument.offsetAt(position));
+      let filename = trimFileUri(document.uri);
+      let occurrences = jsLanguageService.getOccurrencesAtPosition(filename, currentTextDocument.offsetAt(position));
       if (occurrences) {
         return occurrences.map(entry => {
           return {
@@ -205,7 +214,8 @@ export function getJavascriptMode(documentRegions: LanguageModelCache<HTMLDocume
     },
     findDocumentSymbols(document: TextDocument): SymbolInformation[] {
       updateCurrentTextDocument(document);
-      let items = jsLanguageService.getNavigationBarItems(trimFileUri(document.uri));
+      let filename = trimFileUri(document.uri);
+      let items = jsLanguageService.getNavigationBarItems(filename);
       if (items) {
         let result: SymbolInformation[] = [];
         let existing = {};
@@ -241,7 +251,8 @@ export function getJavascriptMode(documentRegions: LanguageModelCache<HTMLDocume
     },
     findDefinition(document: TextDocument, position: Position): Definition {
       updateCurrentTextDocument(document);
-      let definition = jsLanguageService.getDefinitionAtPosition(trimFileUri(document.uri), currentTextDocument.offsetAt(position));
+      let filename = trimFileUri(document.uri);
+      let definition = jsLanguageService.getDefinitionAtPosition(filename, currentTextDocument.offsetAt(position));
       if (definition) {
         return definition.map(d => {
           return {
@@ -254,7 +265,8 @@ export function getJavascriptMode(documentRegions: LanguageModelCache<HTMLDocume
     },
     findReferences(document: TextDocument, position: Position): Location[] {
       updateCurrentTextDocument(document);
-      let references = jsLanguageService.getReferencesAtPosition(trimFileUri(document.uri), currentTextDocument.offsetAt(position));
+      let filename = trimFileUri(document.uri);
+      let references = jsLanguageService.getReferencesAtPosition(filename, currentTextDocument.offsetAt(position));
       if (references) {
         return references.map(d => {
           return {
@@ -276,7 +288,8 @@ export function getJavascriptMode(documentRegions: LanguageModelCache<HTMLDocume
         end -= range.end.character;
         lastLineRange = Range.create(Position.create(range.end.line, 0), range.end);
       }
-      let edits = jsLanguageService.getFormattingEditsForRange(trimFileUri(document.uri), start, end, formatSettings);
+      let filename = trimFileUri(document.uri);
+      let edits = jsLanguageService.getFormattingEditsForRange(filename, start, end, formatSettings);
       if (edits) {
         let result = [];
         for (let edit of edits) {
