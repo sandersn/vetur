@@ -12,11 +12,17 @@ import * as ts from 'typescript';
 const JS_WORD_REGEX = /(-?\d*\.\d\w*)|([^\`\~\!\@\#\%\^\&\*\(\)\-\=\+\[\{\]\}\\\|\;\:\'\"\,\.\<\>\/\?\s]+)/g;
 
 function trimFileUri(uri: string): string {
-  if (uri.slice(0, "file://".length) === "file://") {
-    return uri.slice("file://".length);
+  if (uri.slice(0, 'file://'.length) === 'file://') {
+    return uri.slice('file://'.length);
   }
   return uri;
 }
+
+/*interface DocHostInfo {
+  version: number,
+  doc: TextDocument,
+  isTypeScript: boolean,
+}*/
 
 export function getJavascriptMode(documentRegions: LanguageModelCache<HTMLDocumentRegions>, workspacePath: string): LanguageMode {
   let jsDocuments = getLanguageModelCache<TextDocument>(10, 60, document => {
@@ -31,11 +37,17 @@ export function getJavascriptMode(documentRegions: LanguageModelCache<HTMLDocume
   let currentTextDocument: TextDocument;
   let versions: ts.MapLike<number> = {};
   let docs: ts.MapLike<TextDocument> = {};
+  let lame: ts.MapLike<boolean | undefined> = {};
   function updateCurrentTextDocument(doc: TextDocument) {
     if (!currentTextDocument || doc.uri !== currentTextDocument.uri || doc.version !== currentTextDocument.version) {
       currentTextDocument = jsDocuments.get(doc);
-      docs[trimFileUri(currentTextDocument.uri)] = currentTextDocument;
-      versions[trimFileUri(currentTextDocument.uri)] = (versions[trimFileUri(currentTextDocument.uri)] || 0) + 1;
+      const fileName = trimFileUri(currentTextDocument.uri);
+      if (!(fileName in lame)) {
+        // only set once :|
+        lame[fileName] = currentTextDocument.languageId === 'typescript';
+      }
+      docs[fileName] = currentTextDocument;
+      versions[fileName] = (versions[fileName] || 0) + 1;
     }
   }
 
@@ -43,25 +55,21 @@ export function getJavascriptMode(documentRegions: LanguageModelCache<HTMLDocume
   const { createLanguageServiceSourceFile, updateLanguageServiceSourceFile } = createUpdater();
   (ts as any).createLanguageServiceSourceFile = createLanguageServiceSourceFile;
   (ts as any).updateLanguageServiceSourceFile = updateLanguageServiceSourceFile;
-
-  const configFile = ts.findConfigFile(workspacePath, ts.sys.fileExists, "tsconfig.json") ||
-    ts.findConfigFile(workspacePath, ts.sys.fileExists, "jsconfig.json");
+  const configFile = ts.findConfigFile(workspacePath, ts.sys.fileExists, 'tsconfig.json') ||
+    ts.findConfigFile(workspacePath, ts.sys.fileExists, 'jsconfig.json');
   const files = ts.parseJsonConfigFileContent({},
     ts.sys,
     workspacePath,
     compilerOptions,
     configFile,
     undefined,
-    [{ extension: "vue", isMixedContent: true }]).fileNames;
+    [{ extension: 'vue', isMixedContent: true }]).fileNames;
 
   let host: ts.LanguageServiceHost = {
     getCompilationSettings: () => compilerOptions,
     getScriptFileNames: () => files,
-    getScriptVersion: filename => filename in versions ? versions[filename].toString() : '0',
-    getScriptKind(fileName: string) {
-      // TODO: Actually check the lang property of the language model
-      return ts.ScriptKind.TS; // I like TS!
-    },
+    getScriptVersion: filename => filename in versions ? versions[filename].toString() : '1',
+    getScriptKind: fileName => isVue(fileName) ? (lame[fileName] ? ts.ScriptKind.TS : ts.ScriptKind.JS) : (ts as any).getScriptKindFromFileName(fileName),
     resolveModuleNames(moduleNames: string[], containingFile: string): ts.ResolvedModule[] {
       // in the normal case, delegate to ts.resolveModuleName
       // in the relative vue case, manually build a resolved filename
@@ -70,7 +78,7 @@ export function getJavascriptMode(documentRegions: LanguageModelCache<HTMLDocume
           ts.resolveModuleName(name, containingFile, compilerOptions, ts.sys).resolvedModule : 
           {
             resolvedFileName: path.join(path.dirname(containingFile), name),
-            extension: ts.Extension.Ts,
+            extension: lame[name] ? ts.Extension.Ts : ts.Extension.Js,
           })
     },
     getScriptSnapshot: (fileName: string) => {
