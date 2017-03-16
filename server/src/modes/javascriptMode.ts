@@ -37,14 +37,13 @@ export function getJavascriptMode(documentRegions: LanguageModelCache<HTMLDocume
   let currentTextDocument: TextDocument;
   let versions: ts.MapLike<number> = {};
   let docs: ts.MapLike<TextDocument> = {};
-  let lame: ts.MapLike<boolean | undefined> = {};
   function updateCurrentTextDocument(doc: TextDocument) {
     if (!currentTextDocument || doc.uri !== currentTextDocument.uri || doc.version !== currentTextDocument.version) {
       currentTextDocument = jsDocuments.get(doc);
       const fileName = trimFileUri(currentTextDocument.uri);
-      if (!(fileName in lame)) {
-        // only set once :|
-        lame[fileName] = currentTextDocument.languageId === 'typescript';
+      if (docs[fileName] && currentTextDocument.languageId !== docs[fileName].languageId) {
+        // if languageId changed, restart the language service
+        jsLanguageService = ts.createLanguageService(host);
       }
       docs[fileName] = currentTextDocument;
       versions[fileName] = (versions[fileName] || 0) + 1;
@@ -69,7 +68,8 @@ export function getJavascriptMode(documentRegions: LanguageModelCache<HTMLDocume
     getCompilationSettings: () => compilerOptions,
     getScriptFileNames: () => files,
     getScriptVersion: filename => filename in versions ? versions[filename].toString() : '1',
-    getScriptKind: fileName => isVue(fileName) ? (lame[fileName] ? ts.ScriptKind.TS : ts.ScriptKind.JS) : (ts as any).getScriptKindFromFileName(fileName),
+    // TODO: Rewrite this to be readable again.
+    getScriptKind: fileName => isVue(fileName) ? (docs[fileName] && docs[fileName].languageId === 'typescript' ? ts.ScriptKind.TS : ts.ScriptKind.JS) : (ts as any).getScriptKindFromFileName(fileName),
     resolveModuleNames(moduleNames: string[], containingFile: string): ts.ResolvedModule[] {
       // in the normal case, delegate to ts.resolveModuleName
       // in the relative vue case, manually build a resolved filename
@@ -78,7 +78,7 @@ export function getJavascriptMode(documentRegions: LanguageModelCache<HTMLDocume
           ts.resolveModuleName(name, containingFile, compilerOptions, ts.sys).resolvedModule : 
           {
             resolvedFileName: path.join(path.dirname(containingFile), name),
-            extension: lame[name] ? ts.Extension.Ts : ts.Extension.Js,
+            extension: docs[name] && docs[name].languageId === 'typescript' ? ts.Extension.Ts : ts.Extension.Js,
           })
     },
     getScriptSnapshot: (fileName: string) => {

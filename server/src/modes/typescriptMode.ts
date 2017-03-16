@@ -19,22 +19,22 @@ export function parseVue(text: string): string {
 export function createUpdater() {
   const clssf = ts.createLanguageServiceSourceFile;
   const ulssf = ts.updateLanguageServiceSourceFile;
-  function createLanguageServiceSourceFile(fileName: string, scriptSnapshot: ts.IScriptSnapshot, scriptTarget: ts.ScriptTarget, version: string, setNodeParents: boolean, scriptKind?: ts.ScriptKind): ts.SourceFile {
-    let sourceFile = clssf(fileName, scriptSnapshot, scriptTarget, version, setNodeParents, scriptKind);
-    if (isVue(fileName)) {
-      modifyVueSource(sourceFile);
+  return {
+    createLanguageServiceSourceFile(fileName: string, scriptSnapshot: ts.IScriptSnapshot, scriptTarget: ts.ScriptTarget, version: string, setNodeParents: boolean, scriptKind?: ts.ScriptKind): ts.SourceFile {
+      let sourceFile = clssf(fileName, scriptSnapshot, scriptTarget, version, setNodeParents, scriptKind);
+      if (isVue(fileName)) {
+        modifyVueSource(sourceFile);
+      }
+      return sourceFile;
+    },
+    updateLanguageServiceSourceFile(sourceFile: ts.SourceFile, scriptSnapshot: ts.IScriptSnapshot, version: string, textChangeRange: ts.TextChangeRange, aggressiveChecks?: boolean): ts.SourceFile {
+      sourceFile = ulssf(sourceFile, scriptSnapshot, version, textChangeRange, aggressiveChecks);
+      if (isVue(sourceFile.fileName)) {
+        modifyVueSource(sourceFile);
+      }
+      return sourceFile;
     }
-    return sourceFile;
   }
-
-  function updateLanguageServiceSourceFile(sourceFile: ts.SourceFile, scriptSnapshot: ts.IScriptSnapshot, version: string, textChangeRange: ts.TextChangeRange, aggressiveChecks?: boolean): ts.SourceFile {
-    sourceFile = ulssf(sourceFile, scriptSnapshot, version, textChangeRange, aggressiveChecks);
-    if (isVue(sourceFile.fileName)) {
-      modifyVueSource(sourceFile);
-    }
-    return sourceFile;
-  }
-  return { createLanguageServiceSourceFile, updateLanguageServiceSourceFile }
 }
 
 /** Works like Array.prototype.find, returning `undefined` if no element satisfying the predicate is found. */
