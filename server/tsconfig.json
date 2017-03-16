@@ -4,8 +4,6 @@
     "module": "commonjs",
     "outDir": "../client/server",
     "sourceMap": true,
-    "noUnusedLocals": true,
-    "noImplicitThis": true,
     "lib": [
       "es5", "es2015.promise", "dom"
     ]

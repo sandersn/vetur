@@ -1,4 +1,4 @@
-import { Vls } from 'vetur-vls';
+import { Vls, HTMLDocument, DocumentContext } from 'vetur-vls';
 import { LanguageModelCache, getLanguageModelCache } from '../languageModelCache';
 import { TextDocument, Position, TextEdit, FormattingOptions, Range } from 'vscode-languageserver-types';
 import { getCSSLanguageService, getSCSSLanguageService, getLESSLanguageService, Stylesheet, LanguageService } from 'vscode-css-languageservice';

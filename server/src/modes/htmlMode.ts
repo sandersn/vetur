@@ -2,7 +2,7 @@ import { LanguageModelCache, getLanguageModelCache } from '../languageModelCache
 import { Vls, HTMLDocument, DocumentContext } from 'vetur-vls';
 import { TextDocument, Position, Range, FormattingOptions } from 'vscode-languageserver-types';
 import { LanguageMode } from './languageModes';
-import { HTMLDocumentRegions } from './embeddedSupport';
+import { HTMLDocumentRegions, CSS_STYLE_RULE } from './embeddedSupport';
 
 export function getVueHTMLMode(vls: Vls, documentRegions: LanguageModelCache<HTMLDocumentRegions>): LanguageMode {
   let settings: any = {};
@@ -43,3 +43,12 @@ export function getVueHTMLMode(vls: Vls, documentRegions: LanguageModelCache<HTM
     }
   };
 };
+
+function merge(src: any, dst: any): any {
+  for (var key in src) {
+    if (src.hasOwnProperty(key)) {
+      dst[key] = src[key];
+    }
+  }
+  return dst;
+}
