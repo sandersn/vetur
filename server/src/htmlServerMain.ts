@@ -1,5 +1,5 @@
 import { createConnection, IConnection, TextDocuments, InitializeParams, InitializeResult, RequestType, DocumentRangeFormattingRequest, Disposable, DocumentSelector } from 'vscode-languageserver';
-import { DocumentContext } from 'vscode-html-languageservice';
+import { DocumentContext } from 'vetur-vls';
 import { TextDocument, Diagnostic, DocumentLink, Range, SymbolInformation } from 'vscode-languageserver-types';
 import { getLanguageModes, LanguageModes } from './modes/languageModes';
 
@@ -97,6 +97,7 @@ connection.onDidChangeConfiguration((change) => {
   documents.all().forEach(triggerValidation);
 
   // dynamically enable & disable the formatter
+  // Disable formatter temporarily. https://github.com/octref/vetur/issues/82
   if (clientDynamicRegisterSupport) {
     let enableFormatter = settings && settings.html && settings.html.format && settings.html.format.enable;
     if (enableFormatter) {
@@ -109,7 +110,6 @@ connection.onDidChangeConfiguration((change) => {
       formatterRegistration = null;
     }
   }
-
 });
 
 let pendingValidationRequests: { [uri: string]: NodeJS.Timer } = {};
