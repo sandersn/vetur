@@ -4,25 +4,13 @@ import { LanguageMode } from './languageModes';
 import { getWordAtText, isWhitespaceOnly, repeat } from '../utils/strings';
 import { HTMLDocumentRegions } from './embeddedSupport';
 import path = require('path');
+import url = require('url');
 
 import { createUpdater, parseVue, isVue } from './typescriptMode';
 
 import * as ts from 'typescript';
 
 const JS_WORD_REGEX = /(-?\d*\.\d\w*)|([^\`\~\!\@\#\%\^\&\*\(\)\-\=\+\[\{\]\}\\\|\;\:\'\"\,\.\<\>\/\?\s]+)/g;
-
-function trimFileUri(uri: string): string {
-  if (uri.slice(0, 'file://'.length) === 'file://') {
-    return uri.slice('file://'.length);
-  }
-  return uri;
-}
-
-/*interface DocHostInfo {
-  version: number,
-  doc: TextDocument,
-  isTypeScript: boolean,
-}*/
 
 export function getJavascriptMode(documentRegions: LanguageModelCache<HTMLDocumentRegions>, workspacePath: string): LanguageMode {
   let jsDocuments = getLanguageModelCache<TextDocument>(10, 60, document => {
@@ -42,7 +30,7 @@ export function getJavascriptMode(documentRegions: LanguageModelCache<HTMLDocume
       currentTextDocument = jsDocuments.get(doc);
       const fileName = trimFileUri(currentTextDocument.uri);
       if (docs[fileName] && currentTextDocument.languageId !== docs[fileName].languageId) {
-        // if languageId changed, restart the language service
+        // if languageId changed, we must restart the language service; it can't handle file type changes
         jsLanguageService = ts.createLanguageService(host);
       }
       docs[fileName] = currentTextDocument;
@@ -68,11 +56,17 @@ export function getJavascriptMode(documentRegions: LanguageModelCache<HTMLDocume
     getCompilationSettings: () => compilerOptions,
     getScriptFileNames: () => files,
     getScriptVersion: filename => filename in versions ? versions[filename].toString() : '1',
-    // TODO: Rewrite this to be readable again.
-    getScriptKind: fileName => isVue(fileName) ? (docs[fileName] && docs[fileName].languageId === 'typescript' ? ts.ScriptKind.TS : ts.ScriptKind.JS) : (ts as any).getScriptKindFromFileName(fileName),
+    getScriptKind(fileName) { 
+      if(isVue(fileName) && docs[fileName]) {
+        return docs[fileName].languageId === 'typescript' ? ts.ScriptKind.TS : ts.ScriptKind.JS;
+      }
+      else {
+        return (ts as any).getScriptKindFromFileName(fileName);
+      } 
+    },
     resolveModuleNames(moduleNames: string[], containingFile: string): ts.ResolvedModule[] {
       // in the normal case, delegate to ts.resolveModuleName
-      // in the relative vue case, manually build a resolved filename
+      // in the relative-imported.vue case, manually build a resolved filename
       return moduleNames.map(name => 
         path.isAbsolute(name) || !isVue(name) ? 
           ts.resolveModuleName(name, containingFile, compilerOptions, ts.sys).resolvedModule : 
@@ -97,6 +91,7 @@ export function getJavascriptMode(documentRegions: LanguageModelCache<HTMLDocume
     getCurrentDirectory: () => workspacePath,
     getDefaultLibFileName: ts.getDefaultLibFilePath,
   };
+
   let jsLanguageService = ts.createLanguageService(host);
 
   let settings: any = {};
@@ -114,7 +109,7 @@ export function getJavascriptMode(documentRegions: LanguageModelCache<HTMLDocume
       const diagnostics = [...jsLanguageService.getSyntacticDiagnostics(filename),
                            ...jsLanguageService.getSemanticDiagnostics(filename)];
       
-      return diagnostics.map((diag): Diagnostic => {
+      return diagnostics.map(diag => {
         return {
           range: convertRange(currentTextDocument, diag),
           severity: DiagnosticSeverity.Error,
@@ -333,6 +328,10 @@ export function getJavascriptMode(documentRegions: LanguageModelCache<HTMLDocume
     }
   };
 };
+
+function trimFileUri(uri: string): string {
+  return url.parse(uri).path;
+}
 
 function convertRange(document: TextDocument, span: { start: number, length: number }): Range {
   let startPosition = document.positionAt(span.start);
